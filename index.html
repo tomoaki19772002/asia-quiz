@@ -28,7 +28,10 @@ button{font:inherit;color:inherit}
 .box.low b{color:var(--ng)}
 #mute{flex:0 0 52px;border:0;border-radius:12px;background:var(--card);font-size:22px;box-shadow:0 2px 6px #0001}
 /* map */
-#mapwrap{flex:1;min-height:0;margin:6px 0;background:#d6ecff;border-radius:14px;overflow:hidden}
+#mapwrap{flex:1;min-height:0;margin:6px 0;background:#d6ecff;border-radius:14px;overflow:hidden;position:relative;touch-action:none}
+#zoom{position:absolute;right:8px;top:8px;display:flex;flex-direction:column;gap:6px}
+#zoom button{width:42px;height:42px;border:0;border-radius:10px;background:#fffd;font-size:22px;font-weight:700;box-shadow:0 2px 6px #0003}
+#zoom button:active{background:#fff}
 #map{width:100%;height:100%;display:block}
 #map path{fill:var(--land);stroke:var(--line);stroke-width:1.2;stroke-linejoin:round}
 #map path.ctx{fill:var(--ctx);stroke:#fff;stroke-width:.8}
@@ -74,7 +77,8 @@ button{font:inherit;color:inherit}
       <div class="box"><small>ポイント</small><b id="score">0</b></div>
       <button id="mute" aria-label="音の切り替え">🔊</button>
     </div>
-    <div id="mapwrap"><svg id="map" xmlns="http://www.w3.org/2000/svg"></svg></div>
+    <div id="mapwrap"><svg id="map" xmlns="http://www.w3.org/2000/svg"></svg>
+      <div id="zoom"><button id="zin" aria-label="拡大">＋</button><button id="zout" aria-label="縮小">－</button><button id="zreset" aria-label="全体表示">⌂</button></div></div>
     <div id="qtext"></div>
     <div id="choices"></div>
     <div id="fb"></div>
@@ -97,25 +101,69 @@ const GAME_SEC=120, NS='http://www.w3.org/2000/svg';
 
 /* ---------- 音(WebAudio で合成) ---------- */
 const Sound=(()=>{
-  let ctx,master,muted=false,timer=null,next=0,step=0;
-  const MEL=[72,76,79,76,74,76,72,0, 74,79,81,79,76,74,72,0, 79,81,79,76,74,76,74,72, 76,74,72,74,76,79,76,0];
-  const BAS=[48,0,0,0,43,0,0,0, 45,0,0,0,40,0,0,0, 48,0,0,0,43,0,0,0, 43,0,0,0,48,0,0,0];
-  const STEP=0.2;
+  let ctx,master,muted=false,timer=null,next=0,step=0,drone=[],noiseBuf;
+  /* インド風: ラーガ・バイラヴ(Sa r Ga ma Pa dha Ni)+ タンプーラのドローン + ケヘルワ(8拍)のタブラ */
+  const SA=60;
+  const MEL=[67,0,65,64,65,0,61,60, 60,0,64,65,67,0,68,67, 71,0,72,0,71,68,67,0, 68,67,65,64,61,0,60,0];
+  const STEP=0.19;
   const hz=m=>440*Math.pow(2,(m-69)/12);
+  let last=SA+7;
+  function env(t,vol,dur,atk){
+    const g=ctx.createGain();
+    g.gain.setValueAtTime(0.0001,t);
+    g.gain.exponentialRampToValueAtTime(vol,t+(atk||0.01));
+    g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+    return g;
+  }
   function tone(t,f,dur,type,vol,f2){
-    const o=ctx.createOscillator(),g=ctx.createGain();
+    const o=ctx.createOscillator(),g=env(t,vol,dur,0.015);
     o.type=type;o.frequency.setValueAtTime(f,t);
     if(f2)o.frequency.exponentialRampToValueAtTime(f2,t+dur);
-    g.gain.setValueAtTime(0.0001,t);
-    g.gain.exponentialRampToValueAtTime(vol,t+0.015);
-    g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
     o.connect(g);g.connect(master);o.start(t);o.stop(t+dur+0.02);
   }
+  /* シタール風: 前の音からの「ミーンド」(スライド)+ 倍音 + 共鳴弦 */
+  function sitar(t,m){
+    const f=hz(m),from=hz(last);last=m;
+    const o=ctx.createOscillator(),lp=ctx.createBiquadFilter(),g=env(t,0.2,STEP*3.2,0.008);
+    o.type='sawtooth';
+    o.frequency.setValueAtTime(from,t);o.frequency.exponentialRampToValueAtTime(f,t+0.07);
+    lp.type='lowpass';lp.frequency.setValueAtTime(3200,t);lp.frequency.exponentialRampToValueAtTime(700,t+STEP*3);lp.Q.value=4;
+    o.connect(lp);lp.connect(g);g.connect(master);o.start(t);o.stop(t+STEP*3.3);
+    tone(t,f*2,STEP*1.8,'sine',0.05);
+    tone(t+0.01,f*1.5,STEP*2.4,'sine',0.025);
+  }
+  function noise(t,dur,vol,freq){
+    const s=ctx.createBufferSource();s.buffer=noiseBuf;
+    const bp=ctx.createBiquadFilter();bp.type='bandpass';bp.frequency.value=freq;bp.Q.value=1.2;
+    const g=env(t,vol,dur,0.002);
+    s.connect(bp);bp.connect(g);g.connect(master);s.start(t);s.stop(t+dur+0.02);
+  }
+  /* タブラ: バヤン(低音)とダヤン(高音) */
+  const bayan=t=>tone(t,150,0.35,'sine',0.55,70);
+  const na=t=>{tone(t,560,0.1,'sine',0.3);noise(t,0.05,0.12,3000)};
+  const tin=t=>tone(t,700,0.2,'sine',0.28,640);
+  const ge=t=>tone(t,130,0.22,'sine',0.35,80);
+  const ka=t=>noise(t,0.05,0.14,1800);
+  // ケヘルワ: Dha Ge Na Ti Na Ka Dhi Na
+  const TABLA=[t=>{bayan(t);tin(t)},ge,na,ka,na,ka,t=>{bayan(t);tin(t)},na];
+  function startDrone(){
+    // タンプーラ: Sa(低)・Pa・Sa・Sa' の持続音を少しゆらす
+    [[SA-12,0.12],[SA-5,0.07],[SA,0.05],[SA+12,0.025]].forEach(([m,v],k)=>{
+      const o=ctx.createOscillator(),g=ctx.createGain(),lp=ctx.createBiquadFilter(),lfo=ctx.createOscillator(),lg=ctx.createGain();
+      o.type='sawtooth';o.frequency.value=hz(m);
+      lp.type='lowpass';lp.frequency.value=900;
+      g.gain.value=v;
+      lfo.frequency.value=0.35+k*0.11;lg.gain.value=v*0.6;lfo.connect(lg);lg.connect(g.gain);
+      o.connect(lp);lp.connect(g);g.connect(master);
+      o.start();lfo.start();drone.push(o,lfo);
+    });
+  }
+  function stopDrone(){drone.forEach(o=>{try{o.stop()}catch(e){}});drone=[]}
   function sched(){
     while(next<ctx.currentTime+0.4){
-      const i=step%MEL.length;
-      if(MEL[i])tone(next,hz(MEL[i]),STEP*1.6,'triangle',0.16);
-      if(BAS[i])tone(next,hz(BAS[i]),STEP*3.6,'sine',0.22);
+      const m=MEL[step%MEL.length];
+      if(m)sitar(next,m);
+      TABLA[step%8](next);
       next+=STEP;step++;
     }
   }
@@ -125,13 +173,15 @@ const Sound=(()=>{
         const AC=window.AudioContext||window.webkitAudioContext;
         if(!AC)return;
         ctx=new AC();master=ctx.createGain();master.gain.value=muted?0:0.5;master.connect(ctx.destination);
+        noiseBuf=ctx.createBuffer(1,ctx.sampleRate*0.2,ctx.sampleRate);
+        const d=noiseBuf.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1;
       }
       if(ctx.state==='suspended')ctx.resume();
     },
     bgm(on){
       if(!ctx)return;
-      clearInterval(timer);timer=null;
-      if(on){step=0;next=ctx.currentTime+0.1;sched();timer=setInterval(sched,100)}
+      clearInterval(timer);timer=null;stopDrone();
+      if(on){step=0;last=SA+7;next=ctx.currentTime+0.1;startDrone();sched();timer=setInterval(sched,100)}
     },
     ok(){if(!ctx)return;const t=ctx.currentTime;tone(t,880,0.18,'sine',0.5);tone(t+0.11,1318,0.4,'sine',0.5)},
     ng(){if(!ctx)return;const t=ctx.currentTime;tone(t,220,0.35,'sawtooth',0.3,110);tone(t+0.02,164,0.35,'square',0.18,82)},
@@ -143,7 +193,50 @@ const Sound=(()=>{
 
 /* ---------- 地図 ---------- */
 const svg=$('map');
-svg.setAttribute('viewBox',window.ASIA_VIEWBOX.join(' '));
+const BASE=window.ASIA_VIEWBOX.slice(),MAXZ=8;
+let vb=BASE.slice();
+function applyVB(){svg.setAttribute('viewBox',vb.join(' '))}
+function clampVB(){
+  vb[2]=Math.min(BASE[2],Math.max(BASE[2]/MAXZ,vb[2]));
+  vb[3]=vb[2]*BASE[3]/BASE[2];
+  vb[0]=Math.min(BASE[0]+BASE[2]-vb[2],Math.max(BASE[0],vb[0]));
+  vb[1]=Math.min(BASE[1]+BASE[3]-vb[3],Math.max(BASE[1],vb[1]));
+}
+function zoomAt(f,cx,cy){
+  const m=svg.getScreenCTM().inverse(),px=m.a*cx+m.e,py=m.d*cy+m.f;
+  const w=Math.min(BASE[2],Math.max(BASE[2]/MAXZ,vb[2]/f)),k=w/vb[2];
+  vb[0]=px-(px-vb[0])*k;vb[1]=py-(py-vb[1])*k;vb[2]=w;
+  clampVB();applyVB();
+}
+function zoomCenter(f){const r=svg.getBoundingClientRect();zoomAt(f,r.left+r.width/2,r.top+r.height/2)}
+applyVB();
+{
+  const wrap=$('mapwrap'),ptrs=new Map();let pinch=0;
+  const dist=()=>{const [a,b]=[...ptrs.values()];return Math.hypot(a.x-b.x,a.y-b.y)};
+  wrap.addEventListener('pointerdown',e=>{
+    if(e.target.closest('#zoom'))return;
+    wrap.setPointerCapture(e.pointerId);ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+    pinch=ptrs.size===2?dist():0;
+  });
+  wrap.addEventListener('pointermove',e=>{
+    const o=ptrs.get(e.pointerId);if(!o)return;
+    const dx=e.clientX-o.x,dy=e.clientY-o.y;o.x=e.clientX;o.y=e.clientY;
+    if(ptrs.size===1){
+      const sc=svg.getScreenCTM().a;
+      vb[0]-=dx/sc;vb[1]-=dy/sc;clampVB();applyVB();
+    }else if(ptrs.size===2){
+      const [a,b]=[...ptrs.values()],d=dist();
+      if(pinch)zoomAt(d/pinch,(a.x+b.x)/2,(a.y+b.y)/2);
+      pinch=d;
+    }
+  });
+  const up=e=>{ptrs.delete(e.pointerId);pinch=0};
+  wrap.addEventListener('pointerup',up);wrap.addEventListener('pointercancel',up);
+  wrap.addEventListener('wheel',e=>{e.preventDefault();zoomAt(e.deltaY<0?1.25:0.8,e.clientX,e.clientY)},{passive:false});
+  $('zin').onclick=()=>zoomCenter(1.6);
+  $('zout').onclick=()=>zoomCenter(1/1.6);
+  $('zreset').onclick=()=>{vb=BASE.slice();applyVB()};
+}
 const PREFS=window.COUNTRIES;
 {const c=document.createElementNS(NS,'path');c.setAttribute('d',window.CONTEXT_D);c.setAttribute('class','ctx');c.style.pointerEvents='none';svg.appendChild(c)}
 const pathEl=PREFS.map(p=>{
