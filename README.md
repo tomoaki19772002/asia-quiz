@@ -17,3 +17,5 @@
 - 地図: [Natural Earth](https://www.naturalearthdata.com/) 1:50m(パブリックドメイン)を簡略化して `map-data.js` にしています。モルディブは簡略表示です。
 - 国旗: [flag-icons](https://github.com/lipis/flag-icons)(MIT)の SVG を `flags/` に収録しています。
 
+
+- ハイスコアTOP3を名前つきで記録(この端末のブラウザ内に保存。端末をまたいだ共有はされません)

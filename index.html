@@ -16,6 +16,16 @@ body{background:var(--bg);color:var(--ink);font-family:"Hiragino Maru Gothic Pro
 .center{align-items:center;justify-content:center;text-align:center;gap:14px}
 h1{margin:0;font-size:28px;line-height:1.3}
 .rules{background:var(--card);border-radius:14px;padding:14px 18px;text-align:left;font-size:15px;line-height:1.8;box-shadow:0 2px 8px #0001}
+.rank{background:var(--card);border-radius:14px;padding:10px 16px;min-width:260px;box-shadow:0 2px 8px #0001}
+.rank h2{margin:0 0 4px;font-size:16px}
+.rank ol{margin:0;padding:0;list-style:none;text-align:left;font-size:17px;font-weight:700}
+.rank li{display:flex;gap:8px;padding:2px 0}
+.rank li .n{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rank li.me{color:var(--accent)}
+.rank li.none{color:#99a;font-weight:400}
+#namebox{display:none;flex-direction:column;gap:8px;align-items:center}
+#namebox.on{display:flex}
+#namebox input{font:inherit;font-size:20px;padding:8px 12px;border:2px solid var(--accent);border-radius:10px;width:240px;text-align:center}
 .big{font-size:64px;font-weight:800;color:var(--accent)}
 button{font:inherit;color:inherit}
 .btn{border:0;border-radius:14px;background:var(--accent);color:#fff;font-size:20px;font-weight:700;padding:14px 40px;box-shadow:0 3px 0 #14509b}
@@ -67,6 +77,7 @@ button{font:inherit;color:inherit}
       ・正解 <b>+1</b> / まちがい <b>−1</b><br>
       ・制限時間は <b>2分</b>
     </div>
+    <div class="rank"><h2>🏆 ハイスコア TOP3</h2><ol id="ranklist0"></ol></div>
     <button class="btn" id="start">スタート</button>
     <small>🔊 音が出ます(マナーモードを確認してね)</small>
   </section>
@@ -89,6 +100,8 @@ button{font:inherit;color:inherit}
     <div>2分間のポイント</div>
     <div class="big" id="final">0</div>
     <div id="detail"></div>
+    <div id="namebox"><b>🎉 トップ3入り!名前を入力</b><input id="name" maxlength="8" placeholder="なまえ(8文字まで)" autocomplete="off"><button class="btn" id="save" style="padding:10px 30px;font-size:18px">登録</button></div>
+    <div class="rank"><h2>🏆 ハイスコア TOP3</h2><ol id="ranklist"></ol></div>
     <button class="btn" id="retry">もう一度</button>
   </section>
 
@@ -370,16 +383,48 @@ function start(){
   clearInterval(tick);tick=setInterval(setTime,100);
   askPref();
 }
+/* ---------- ハイスコア(この端末のブラウザに保存) ---------- */
+const RKEY='asia-quiz-top3';
+const Rank={
+  load(){try{const a=JSON.parse(localStorage.getItem(RKEY));return Array.isArray(a)?a.slice(0,3):[]}catch(e){return[]}},
+  save(a){try{localStorage.setItem(RKEY,JSON.stringify(a))}catch(e){}},
+  qualifies(sc){const a=this.load();return sc>0&&(a.length<3||sc>a[a.length-1].score)},
+  add(name,sc){const a=this.load();const e={name,score:sc,date:new Date().toLocaleDateString('ja-JP')};a.push(e);a.sort((x,y)=>y.score-x.score);const t=a.slice(0,3);this.save(t);return t.indexOf(e)}
+};
+function showRank(id,mine){
+  const a=Rank.load(),ol=$(id);ol.innerHTML='';
+  for(let i=0;i<3;i++){
+    const li=document.createElement('li'),e=a[i];
+    li.innerHTML=e?`<span>${['🥇','🥈','🥉'][i]}</span><span class="n"></span><span>${e.score>0?'+':''}${e.score}</span>`:`<span>${['🥇','🥈','🥉'][i]}</span><span class="n">---</span>`;
+    if(e)li.querySelector('.n').textContent=e.name;else li.className='none';
+    if(i===mine)li.classList.add('me');
+    ol.appendChild(li);
+  }
+}
 function finish(){
   if(ended)return;
   ended=true;clearInterval(tick);Sound.bgm(false);
   $('final').textContent=(score>0?'+':'')+score;
   $('detail').textContent=`正解 ${right} 問 / まちがい ${wrong} 問`;
+  const q=Rank.qualifies(score);
+  $('namebox').classList.toggle('on',q);$('retry').style.display=q?'none':'';
+  if(q){try{$('name').value=localStorage.getItem('asia-quiz-name')||''}catch(e){}}
+  showRank('ranklist',-1);
   show('s-end');
+}
+function saveName(){
+  const name=($('name').value.trim()||'ななし').slice(0,8);
+  try{localStorage.setItem('asia-quiz-name',name)}catch(e){}
+  const pos=Rank.add(name,score);
+  $('namebox').classList.remove('on');$('retry').style.display='';
+  showRank('ranklist',pos);showRank('ranklist0',-1);
 }
 
 $('start').onclick=start;
 $('retry').onclick=start;
+$('save').onclick=saveName;
+$('name').addEventListener('keydown',e=>{if(e.key==='Enter')saveName()});
+showRank('ranklist0',-1);
 $('mute').onclick=()=>{
   Sound.setMuted(!Sound.muted);
   $('mute').textContent=Sound.muted?'🔇':'🔊';
